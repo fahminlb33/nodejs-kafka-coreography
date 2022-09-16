@@ -1,31 +1,23 @@
 const winston = require('winston');
 const apm = require("elastic-apm-node");
-const { logLevel } = require('kafkajs');
-const { ElasticsearchTransport } = require('winston-elasticsearch');
+const ecsFormat = require('@elastic/ecs-winston-format')
 
 const config = require("./config");
 
-const apmInstance = apm.start({
+apm.start({
     serverUrl: config.elastic.apm.server
 });
 
 module.exports = winston.createLogger({
     level: "debug",
-    defaultMeta: { service: 'sv-order' },
+    defaultMeta: { service: 'sv-driver' },
     transports: [
         new winston.transports.Console({
             format: winston.format.prettyPrint({colorize: true})
         }),
-        new ElasticsearchTransport({
-            level: "debug",
-            apm: apmInstance,
-            clientOpts: {
-                node: config.elastic.elasticsearch.node,
-                auth: {
-                    username: config.elastic.elasticsearch.username,
-                    password: config.elastic.elasticsearch.password
-                }
-            }
+        new winston.transports.File({
+            filename: config.logname,
+            format: ecsFormat()
         })
     ]
 });

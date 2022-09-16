@@ -6,6 +6,8 @@ volumes:
     driver: local
   volume_mongo:
     driver: local
+  volume_logs:
+    driver: local
 
 # --- app networks
 networks:
@@ -41,10 +43,8 @@ services:
   apm:
     image: docker.elastic.co/apm/apm-server:7.15.2
     depends_on: 
-      elasticsearch:
-        condition: service_healthy
-      kibana:
-        condition: service_healthy
+      - elasticsearch
+      - kibana
     ports:
       - 8200:8200
     command: >
@@ -63,8 +63,7 @@ services:
     image: docker.elastic.co/kibana/kibana:7.15.2
     restart: always
     depends_on: 
-      elasticsearch:
-        condition: service_healthy
+      - elasticsearch
     ports:
       - 5601:5601
     networks:
@@ -75,7 +74,19 @@ services:
     healthcheck:
       interval: 10s
       retries: 20
-      test: curl --write-out 'HTTP %{http_code}' --fail --silent --output /dev/null http://localhost:5601/api/status
+      test: curl --write-out 'HTTP %{http_code}' --fail --silent --output /dev/null http://localhost:5601/api/status\
+
+  # filebeat
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:7.15.2
+    networks:
+      - network_main
+    volumes:
+      - ./filebeat.yml:/usr/share/filebeat/filebeat.yml
+      - volume_logs:/logs
+    environment:
+      - ELASTICSEARCH_HOST=elasticsearch:9092
+      - KIBANA_HOST=kibana:5601
 
   # kafka zookeeper
   kafka_zookeeper:
@@ -155,6 +166,8 @@ services:
       - 3001:3000
     networks:
       - network_main
+    volumes:
+      - volume_logs:/app/logs
     environment:
       WAIT_HOSTS: kafka_broker:9092, mongodb:27017, elasticsearch:9200, apm:8200, kibana:5601
       WAIT_TIMEOUT: 60
@@ -170,6 +183,8 @@ services:
       - 3002:3000
     networks:
       - network_main
+    volumes:
+      - volume_logs:/app/logs
     environment:
       WAIT_HOSTS: kafka_broker:9092, mongodb:27017, elasticsearch:9200, apm:8200, kibana:5601
       WAIT_TIMEOUT: 60
@@ -185,6 +200,8 @@ services:
       - 3003:3000
     networks:
       - network_main
+    volumes:
+      - volume_logs:/app/logs
     environment:
       WAIT_HOSTS: kafka_broker:9092, mongodb:27017, elasticsearch:9200, apm:8200, kibana:5601
       WAIT_TIMEOUT: 60

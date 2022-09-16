@@ -1,0 +1,17 @@
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /logs/*.log
+
+processors:
+  - decode_json_fields:
+      fields: ["message"]
+      process_array: false
+      max_depth: 2
+      target: ""
+      overwrite_keys: true
+      add_error_key: false
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"] 

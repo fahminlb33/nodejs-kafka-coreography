@@ -1,6 +1,7 @@
 module.exports = {
     // web app
     port: 3000,
+    logname: "logs/service-driver.log",
 
     // kafka
     kafka: {
@@ -16,11 +17,6 @@ module.exports = {
     elastic: {
         apm: {
             server: "http://apm:8200",
-        },
-        elasticsearch: {
-            node: "http://elasticsearch:9200",
-            username: "fahmi",
-            password: "fahmi",
         }
     }
 }

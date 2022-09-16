@@ -103,8 +103,14 @@ module.exports = class DomainOrder {
         const document = await collection.findOne({ deliveryDetailId });
 
         // belum di assign salah satunya? return
-        if (!document.fulfillment.isTruckAssigned && !document.fulfillment.isDriverAssigned) {
+        if (!document.fulfillment.isTruckAssigned || !document.fulfillment.isDriverAssigned) {
             logger.info(`Order with ID: ${deliveryDetailId} not processed yet, truck: ${document.fulfillment.isTruckAssigned}, driver: ${document.fulfillment.isDriverAssigned}`);
+            return;
+        }
+
+        // skip kalau code sebelumnya itu sudah 2
+        if (document.deliveryDetailStatus.pop().code === "2") {
+            logger.info(`Skipping reprocessing order with ID: ${deliveryDetailId}`);
             return;
         }
 
