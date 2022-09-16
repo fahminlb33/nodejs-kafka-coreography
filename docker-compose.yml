@@ -1,0 +1,190 @@
+version: "3.9"
+
+# --- app volumes
+volumes:
+  volume_es:
+    driver: local
+  volume_mongo:
+    driver: local
+
+# --- app networks
+networks:
+  network_main:
+    driver: bridge
+
+# --- app services
+services:
+  # elasticsearch node
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.15.2
+    ports:
+      - 9200:9200
+      - 9300:9300
+    volumes:
+      - volume_es:/usr/share/elasticsearch/data
+    networks:
+      - network_main
+    healthcheck:
+      interval: 20s
+      retries: 10
+      test: curl -s http://localhost:9200/_cluster/health | grep -vq '"status":"red"'
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - cluster.name=docker-cluster
+      - cluster.routing.allocation.disk.threshold_enabled=false
+      - cluster.routing.allocation.disk.watermark.low=65%
+      - cluster.routing.allocation.disk.watermark.high=70%
+      - "ES_JAVA_OPTS=-XX:UseAVX=2 -Xms512m -Xmx512m"
+
+  # elastic apm server
+  apm:
+    image: docker.elastic.co/apm/apm-server:7.15.2
+    depends_on: 
+      elasticsearch:
+        condition: service_healthy
+      kibana:
+        condition: service_healthy
+    ports:
+      - 8200:8200
+    command: >
+      apm-server -e
+        -E apm-server.rum.enabled=true
+        -E apm-server.kibana.enabled=true
+        -E apm-server.kibana.host=kibana:5601
+        -E setup.kibana.host=kibana:5601
+        -E setup.template.settings.index.number_of_replicas=0
+        -E output.elasticsearch.hosts=["elasticsearch:9200"]
+    networks:
+      - network_main
+
+  # kibana dashboard
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.15.2
+    restart: always
+    depends_on: 
+      elasticsearch:
+        condition: service_healthy
+    ports:
+      - 5601:5601
+    networks:
+      - network_main
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    healthcheck:
+      interval: 10s
+      retries: 20
+      test: curl --write-out 'HTTP %{http_code}' --fail --silent --output /dev/null http://localhost:5601/api/status
+
+  # kafka zookeeper
+  kafka_zookeeper:
+    image: confluentinc/cp-zookeeper:7.2.1
+    hostname: kafka_zookeeper
+    container_name: kafka_zookeeper
+    ports:
+      - 2181:2181
+    networks:
+      - network_main
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  # kafka broker
+  kafka_broker:
+    image: confluentinc/cp-kafka:7.2.1
+    hostname: kafka_broker
+    container_name: kafka_broker
+    depends_on:
+      - kafka_zookeeper
+    ports:
+      - "29092:29092"
+      - "9092:9092"
+      - "9101:9101"
+    networks:
+      - network_main
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'kafka_zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka_broker:29092,PLAINTEXT_HOST://kafka_broker:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  # akhq
+  akhq:
+    image: tchiotludo/akhq
+    depends_on: 
+      - kafka_broker
+    ports:
+      - 8080:8080
+    networks:
+      - network_main
+    environment:
+      AKHQ_CONFIGURATION: |
+        akhq:
+          connections:
+            docker-kafka-server:
+              properties:
+                bootstrap.servers: "kafka_broker:9092"
+
+  # mongodb
+  mongodb:
+    image: mongo
+    ports:
+      - 27017:27017
+    volumes:
+      - volume_mongo:/data/db
+    networks:
+      - network_main
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: meong
+      MONGO_INITDB_ROOT_PASSWORD: meongmeong
+
+  # backend services
+  sv_order:
+    build: sv-order
+    depends_on: 
+      - elasticsearch
+      - apm
+      - mongodb
+      - kafka_broker
+    ports:
+      - 3001:3000
+    networks:
+      - network_main
+    environment:
+      WAIT_HOSTS: kafka_broker:9092, mongodb:27017, elasticsearch:9200, apm:8200, kibana:5601
+      WAIT_TIMEOUT: 60
+
+  sv_driver:
+    build: sv-driver
+    depends_on: 
+      - elasticsearch
+      - apm
+      - mongodb
+      - kafka_broker
+    ports:
+      - 3002:3000
+    networks:
+      - network_main
+    environment:
+      WAIT_HOSTS: kafka_broker:9092, mongodb:27017, elasticsearch:9200, apm:8200, kibana:5601
+      WAIT_TIMEOUT: 60
+
+  sv_truck:
+    build: sv-truck
+    depends_on: 
+      - elasticsearch
+      - apm
+      - mongodb
+      - kafka_broker
+    ports:
+      - 3003:3000
+    networks:
+      - network_main
+    environment:
+      WAIT_HOSTS: kafka_broker:9092, mongodb:27017, elasticsearch:9200, apm:8200, kibana:5601
+      WAIT_TIMEOUT: 60
