@@ -1,6 +1,8 @@
 const { Db } = require("mongodb");
 const { Producer } = require('kafkajs');
 
+const logger = require("./logger");
+
 module.exports = class DomainDriver {
     constructor(db, producer) {
         // ini buat type hint aja, ga ngaruh kalau ga dipake juga
@@ -10,6 +12,11 @@ module.exports = class DomainDriver {
         this.db = db;
         /** @type {Producer} */
         this.producer = producer;
+
+        this.seed = this.seed.bind(this);
+        this.list = this.list.bind(this);
+        this.assignDriverForOrder = this.assignDriverForOrder.bind(this);
+        this.unassignDriverForOrderCancellation = this.unassignDriverForOrderCancellation.bind(this);
     }
 
     async seed() {

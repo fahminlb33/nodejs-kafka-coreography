@@ -1,6 +1,7 @@
 const { Db } = require("mongodb");
 const { Producer } = require('kafkajs');
 const { v4: uuidv4 } = require("uuid");
+
 const logger = require("./logger");
 
 module.exports = class DomainOrder {
@@ -12,10 +13,18 @@ module.exports = class DomainOrder {
         this.db = db;
         /** @type {Producer} */
         this.producer = producer;
+
+        this.list = this.list.bind(this);
+        this.createOrder = this.createOrder.bind(this);
+        this.truckAssigned = this.truckAssigned.bind(this);
+        this.driverAssigned = this.driverAssigned.bind(this);
+        this.checkOrderConfirmation = this.checkOrderConfirmation.bind(this);
+        this.driverConflicted = this.driverConflicted.bind(this);
+        this.truckConflicted = this.truckConflicted.bind(this);
     }
 
     async list() {
-        const collection = this.db.collection("delivertDetails");
+        const collection = this.db.collection("deliveryDetails");
         const result = await collection.find({}).toArray();
 
         return result;
@@ -25,7 +34,7 @@ module.exports = class DomainOrder {
         // buat order, tapi belum ready
         // baru ada tapi belum di assign ke driver, belum assign ke truck juga
         // baru "nandain" aja, ini namanya RESERVATION PATTERN
-        const collection = this.db.collection("delivertDetails");
+        const collection = this.db.collection("deliveryDetails");
         const result = await collection.insertOne({
             deliveryDetailId: uuidv4(),
             deliveryDetailStatus: [{
@@ -63,7 +72,7 @@ module.exports = class DomainOrder {
     async truckAssigned({ deliveryDetailId }) {
         // update status jadi assigned
         // ga perlu validasi apakah truck nya ada apa engga, karena udah divalidasi di service nya truck
-        const collection = this.db.collection("delivertDetails");
+        const collection = this.db.collection("deliveryDetails");
         await collection.updateOne({deliveryDetailId}, {
             $set: {
                 'fulfillment.isTruckAssigned': true,
@@ -77,7 +86,7 @@ module.exports = class DomainOrder {
     async driverAssigned({ deliveryDetailId }) {
         // update status jadi assigned
         // ga perlu validasi apakah drivernya nya ada apa engga, karena udah divalidasi di service nya driver
-        const collection = this.db.collection("delivertDetails");
+        const collection = this.db.collection("deliveryDetails");
         await collection.updateOne({deliveryDetailId}, {
             $set: {
                 'fulfillment.isDriverAssigned': true,
@@ -90,17 +99,18 @@ module.exports = class DomainOrder {
 
     async checkOrderConfirmation({ deliveryDetailId }) {
         // ini buat cek apakah semua kondisi sudah terpenuhi untuk mulai proses order
-        const collection = this.db.collection("delivertDetails");
+        const collection = this.db.collection("deliveryDetails");
         const document = await collection.findOne({ deliveryDetailId });
 
         // belum di assign salah satunya? return
         if (!document.fulfillment.isTruckAssigned && !document.fulfillment.isDriverAssigned) {
+            logger.info(`Order with ID: ${deliveryDetailId} not processed yet, truck: ${document.fulfillment.isTruckAssigned}, driver: ${document.fulfillment.isDriverAssigned}`);
             return;
         }
 
         // tambah status
         await collection.updateOne({deliveryDetailId}, {
-            $push: {
+            $addToSet: {
                 deliveryDetailStatus: {
                     code: "2",
                     name: "Sedang dikirim",
@@ -124,7 +134,7 @@ module.exports = class DomainOrder {
 
     async driverConflicted({ deliveryDetailId, reason }) {
         // update status jadi conflicted
-        const collection = this.db.collection("delivertDetails");
+        const collection = this.db.collection("deliveryDetails");
         await collection.updateOne({deliveryDetailId}, {
             $set: {
                 'fulfillment.isDriverAssigned': false,
@@ -143,14 +153,14 @@ module.exports = class DomainOrder {
             topic: "order-cancelled",
             messages: [{
                 value: JSON.stringify({ deliveryDetailId }),
-                key: document.deliveryDetailId,
+                key: deliveryDetailId,
             }]
         });
     }
 
     async truckConflicted({ deliveryDetailId, reason }) {
         // update status jadi conflicted
-        const collection = this.db.collection("delivertDetails");
+        const collection = this.db.collection("deliveryDetails");
         await collection.updateOne({deliveryDetailId}, {
             $set: {
                 'fulfillment.isTruckAssigned': false,
@@ -165,13 +175,12 @@ module.exports = class DomainOrder {
         });
 
         logger.info(`Order with ID: ${deliveryDetailId} is conflicted (truck) because: ${reason}`);
-
         const document = await collection.findOne({ deliveryDetailId });
         await this.producer.send({
             topic: "order-cancelled",
             messages: [{
                 value: JSON.stringify(document),
-                key: document.deliveryDetailId,
+                key: deliveryDetailId,
             }]
         });
     }
